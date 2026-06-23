@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- Tests don't need XML doc comments on every method -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="SBESharp" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Main library: SbeMessageHeader, SbeSerializer, ISbeDeserializable -->
+    <ProjectReference Include="..\..\src\SBESharp\SBESharp.csproj" />
+
+    <!-- Referenced as a normal assembly to call SourceFormatter and Roslyn APIs directly in unit tests -->
+    <ProjectReference
+      Include="..\..\src\SBESharp.Generator\SBESharp.Generator.csproj"
+      ReferenceOutputAssembly="true" />
+
+    <!-- Also run as a source generator on the TestSchemas below -->
+    <ProjectReference
+      Include="..\..\src\SBESharp.Generator\SBESharp.Generator.csproj"
+      OutputItemType="Analyzer"
+      ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Schemas fed to the generator during test compilation -->
+    <AdditionalFiles Include="TestSchemas\*.sbe.xml" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,16 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="NonTUnit" />
+  </Configurations>
+  <Folder Name="/src/">
+    <Project Path="src/SBESharp/SBESharp.csproj" />
+    <Project Path="src/SBESharp.Roslyn/SBESharp.Roslyn.csproj" />
+    <Project Path="src/SBESharp.Generator/SBESharp.Generator.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/SBESharp.Tests/SBESharp.Tests.csproj" />
+    <Project Path="tests/SBESharp.Roslyn.Tests/SBESharp.Roslyn.Tests.csproj" />
+    <Project Path="tests/SBESharp.Generator.Tests/SBESharp.Generator.Tests.csproj" />
+  </Folder>
+</Solution>

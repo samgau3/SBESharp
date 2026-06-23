@@ -1,0 +1,54 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>SBESharp</PackageId>
+    <Version>0.1.0-preview.1</Version>
+    <Authors>Samuel Gaudreau</Authors>
+    <Company>Samuel Gaudreau</Company>
+    <Product>SBESharp</Product>
+    <Description>Zero-allocation, source-generated Simple Binary Encoding (SBE) for .NET 10+. NativeAOT- and trim-safe, with compile-time code generation from SBE XML schemas.</Description>
+    <PackageTags>sbe;simple-binary-encoding;serialization;source-generator;aot;nativeaot;low-latency;fix;zero-allocation</PackageTags>
+    <Copyright>Copyright (c) 2026 Samuel Gaudreau</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://github.com/samgau3/SBESharp</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/samgau3/SBESharp</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <DevelopmentDependency>false</DevelopmentDependency>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference
+      Include="..\SBESharp.Generator\SBESharp.Generator.csproj"
+      OutputItemType="Analyzer"
+      ReferenceOutputAssembly="false"
+      PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AdditionalFiles Include="**/*.sbe.xml" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);_AddGeneratorToPackage</TargetsForTfmSpecificContentInPackage>
+  </PropertyGroup>
+
+  <Target Name="_AddGeneratorToPackage" DependsOnTargets="ResolveReferences">
+    <ItemGroup>
+      <TfmSpecificPackageFile Include="@(Analyzer)" Condition="'%(Analyzer.Filename)' == 'SBESharp.Generator'">
+        <PackagePath>analyzers/dotnet/cs</PackagePath>
+      </TfmSpecificPackageFile>
+    </ItemGroup>
+  </Target>
+
+</Project>

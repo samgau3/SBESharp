@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Weather-station schema exercising big-endian byte order end to end:
+  - Every multi-byte primitive in one message (WeatherReportMessage)
+  - uint16-based enum and set types (multi-byte BE reads)
+  - Composite field at message level (GeoPosition)
+  - Fixed-length array field at message level (WindProfileMessage)
+  - Repeating group with scalar-only fields (the supported BE subset)
+  - Message-level varData with a uint16 big-endian length prefix
+-->
+<messageSchema
+  xmlns="http://fixprotocol.io/2016/sbe"
+  package="SBESharp.TestSchemas.BigEndian"
+  id="104"
+  version="0"
+  description="Weather station schema exercising big-endian encoding"
+  byteOrder="bigEndian">
+
+  <types>
+    <type name="uint16"  primitiveType="uint16"/>
+    <type name="uint32"  primitiveType="uint32"/>
+    <type name="int16"   primitiveType="int16"/>
+    <type name="int32"   primitiveType="int32"/>
+    <type name="int64"   primitiveType="int64"/>
+    <type name="float"   primitiveType="float"/>
+    <type name="double"  primitiveType="double"/>
+
+    <!-- Fixed-length array: four gust-speed samples -->
+    <type name="GustSpeeds" primitiveType="float" length="4"/>
+
+    <composite name="messageHeader">
+      <type name="blockLength" primitiveType="uint16"/>
+      <type name="templateId"  primitiveType="uint16"/>
+      <type name="schemaId"    primitiveType="uint16"/>
+      <type name="version"     primitiveType="uint16"/>
+    </composite>
+
+    <composite name="groupSizeEncoding">
+      <type name="blockLength" primitiveType="uint16"/>
+      <type name="numInGroup"  primitiveType="uint8"/>
+    </composite>
+
+    <composite name="varStringEncoding">
+      <type name="length"  primitiveType="uint16"/>
+      <type name="varData" primitiveType="uint8" length="0" characterEncoding="UTF-8"/>
+    </composite>
+
+    <!-- Latitude/longitude scaled by 1e7 -->
+    <composite name="GeoPosition" description="Geographic position in 1e-7 degree units">
+      <type name="latitude"  primitiveType="int32"/>
+      <type name="longitude" primitiveType="int32"/>
+    </composite>
+
+    <enum name="SkyCondition" encodingType="uint16" description="Observed sky condition (uint16 enum)">
+      <validValue name="Clear"  description="Clear sky">1</validValue>
+      <validValue name="Cloudy" description="Cloud cover">2</validValue>
+      <validValue name="Rain"   description="Precipitation">3</validValue>
+      <validValue name="Snow"   description="Snowfall">4</validValue>
+    </enum>
+
+    <set name="StationFlags" encodingType="uint16" description="Station capability flags (uint16 set)">
+      <choice name="Online"       description="Station is online">0</choice>
+      <choice name="Heated"       description="Sensors are heated">1</choice>
+      <choice name="SolarPowered" description="Solar powered">2</choice>
+    </set>
+  </types>
+
+  <!--
+    WeatherReportMessage: every multi-byte primitive plus a uint16 enum,
+    a uint16 set, and a composite field, all read big-endian.
+    Fixed block: 4+8+4+4+2+2+4+8+2+2+8 = 48 bytes
+  -->
+  <message name="WeatherReportMessage" id="1" blockLength="48" description="Full weather observation with big-endian fields">
+    <field name="StationId"         id="1"  type="uint32"       description="Station identifier"/>
+    <field name="ObservationTime"   id="2"  type="int64"        description="Observation timestamp in nanoseconds"/>
+    <field name="TemperatureMilliC" id="3"  type="int32"        description="Temperature in millidegrees Celsius"/>
+    <field name="PressurePa"        id="4"  type="uint32"       description="Barometric pressure in pascal"/>
+    <field name="HumidityPercent"   id="5"  type="uint16"       description="Relative humidity percentage"/>
+    <field name="WindDirectionDeg"  id="6"  type="int16"        description="Wind direction in degrees"/>
+    <field name="WindSpeedMps"      id="7"  type="float"        description="Wind speed in metres per second"/>
+    <field name="DewPointC"         id="8"  type="double"       description="Dew point in degrees Celsius"/>
+    <field name="Sky"               id="9"  type="SkyCondition" description="Observed sky condition"/>
+    <field name="Flags"             id="10" type="StationFlags" description="Station capability flags"/>
+    <field name="Position"          id="11" type="GeoPosition"  description="Station position"/>
+  </message>
+
+  <!--
+    WindProfileMessage: fixed-length array at message level, a repeating
+    group with scalar-only fields (the supported big-endian subset), and
+    message-level varData.
+    Fixed block: uint32 + float[4] = 4 + 16 = 20 bytes
+    Levels entry: int32 + float + uint16 = 10 bytes
+  -->
+  <message name="WindProfileMessage" id="2" blockLength="20" description="Wind profile with array, group, and varData">
+    <field name="StationId"  id="1" type="uint32"     description="Station identifier"/>
+    <field name="GustSpeeds" id="2" type="GustSpeeds" description="Four most recent gust speeds"/>
+    <group name="Levels" id="10" dimensionType="groupSizeEncoding" description="Wind readings by altitude">
+      <field name="AltitudeM"    id="11" type="int32"  description="Altitude in metres"/>
+      <field name="SpeedMps"     id="12" type="float"  description="Wind speed in metres per second"/>
+      <field name="DirectionDeg" id="13" type="uint16" description="Wind direction in degrees"/>
+    </group>
+    <data name="StationName" id="20" type="varStringEncoding" description="Human-readable station name"/>
+  </message>
+
+</messageSchema>

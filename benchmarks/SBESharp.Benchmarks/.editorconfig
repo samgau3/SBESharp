@@ -1,0 +1,6 @@
+# Benchmarks are a standalone dev tool and are not held to the library's StyleCop / code-style rules.
+[*.cs]
+dotnet_diagnostic.SA1101.severity = none
+dotnet_diagnostic.IDE0009.severity = none
+# DirectBuffer lifetime is managed via [GlobalCleanup], not IDisposable on the benchmark type.
+dotnet_diagnostic.CA1001.severity = none

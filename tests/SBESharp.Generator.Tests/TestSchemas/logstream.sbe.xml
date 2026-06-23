@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Log-stream schema exercising variable-length data fields inside repeating
+  groups — a key SBE feature that requires careful offset tracking during
+  deserialization. Structurally based on the Real Logic SBE reference
+  implementation "group-with-data-schema.xml" test resource.
+-->
+<messageSchema
+  xmlns="http://fixprotocol.io/2016/sbe"
+  package="SBESharp.TestSchemas.LogStream"
+  id="104"
+  version="0"
+  description="Log records with variable-length data inside groups"
+  byteOrder="littleEndian">
+
+  <types>
+    <type name="uint8"  primitiveType="uint8"/>
+    <type name="uint16" primitiveType="uint16"/>
+    <type name="uint32" primitiveType="uint32"/>
+    <type name="int64"  primitiveType="int64"/>
+
+    <composite name="messageHeader">
+      <type name="blockLength" primitiveType="uint16"/>
+      <type name="templateId"  primitiveType="uint16"/>
+      <type name="schemaId"    primitiveType="uint16"/>
+      <type name="version"     primitiveType="uint16"/>
+    </composite>
+
+    <composite name="groupSizeEncoding">
+      <type name="blockLength" primitiveType="uint16"/>
+      <type name="numInGroup"  primitiveType="uint8"/>
+    </composite>
+
+    <composite name="varDataEncoding">
+      <type name="length"  primitiveType="uint8"/>
+      <type name="varData" primitiveType="uint8" length="0" characterEncoding="UTF-8"/>
+    </composite>
+  </types>
+
+  <!--
+    RecordWithNote: a group where each entry has fixed fields
+    followed by a single variable-length data field.
+    Fixed block: uint32 = 4 bytes (blockLength=16 exercises root-block padding)
+  -->
+  <message name="RecordWithNote" id="1" blockLength="16" description="Group entries with a single var-data note">
+    <field name="StreamId" id="1" type="uint32" description="Log stream identifier"/>
+    <group name="Records" id="2" dimensionType="groupSizeEncoding" description="Log records with a note">
+      <field name="Timestamp" id="3" type="int64" description="Record timestamp"/>
+      <field name="ThreadId"  id="4" type="int64" description="Originating thread"/>
+      <data  name="Note" id="5" type="varDataEncoding" description="Variable-length note"/>
+    </group>
+  </message>
+
+  <!--
+    RecordWithAttachments: each group entry has fixed fields followed by
+    TWO variable-length data fields.
+    Fixed block: uint32 = 4 bytes (blockLength=16)
+  -->
+  <message name="RecordWithAttachments" id="2" blockLength="16" description="Group entries with multiple var-data fields">
+    <field name="StreamId" id="1" type="uint32" description="Log stream identifier"/>
+    <group name="Records" id="2" dimensionType="groupSizeEncoding" description="Log records with attachments">
+      <field name="Timestamp" id="3" type="int64" description="Record timestamp"/>
+      <field name="ThreadId"  id="4" type="int64" description="Originating thread"/>
+      <data  name="Note"       id="5" type="varDataEncoding" description="Variable-length note"/>
+      <data  name="Attachment" id="6" type="varDataEncoding" description="Variable-length attachment"/>
+    </group>
+  </message>
+
+  <!--
+    NestedRecords: outer group contains a nested group, and both
+    the nested group entries and the outer group entries have var data.
+    This is the hardest offset-tracking scenario in SBE.
+    Fixed block: uint32 = 4 bytes (blockLength=16)
+  -->
+  <message name="NestedRecords" id="3" blockLength="16" description="Nested group with var data at both levels">
+    <field name="StreamId" id="1" type="uint32" description="Log stream identifier"/>
+    <group name="Records" id="2" dimensionType="groupSizeEncoding" description="Outer log records">
+      <field name="Timestamp" id="3" type="int64" description="Record timestamp"/>
+      <group name="Spans" id="4" dimensionType="groupSizeEncoding" description="Nested trace spans">
+        <field name="Duration" id="5" type="int64" description="Span duration"/>
+        <data  name="SpanNote" id="6" type="varDataEncoding" description="Nested span note"/>
+      </group>
+      <data name="Note" id="7" type="varDataEncoding" description="Outer record note"/>
+    </group>
+  </message>
+
+  <!--
+    AnnotationsOnly: group entries contain ONLY variable-length data
+    fields and no fixed fields. Tests zero-blockLength group entries.
+    Fixed block: uint32 = 4 bytes (blockLength=16)
+  -->
+  <message name="AnnotationsOnly" id="4" blockLength="16" description="Group entries with only var-data fields">
+    <field name="StreamId" id="1" type="uint32" description="Log stream identifier"/>
+    <group name="Annotations" id="2" dimensionType="groupSizeEncoding" description="Key/value annotations">
+      <data name="Key"   id="5" type="varDataEncoding" description="Annotation key"/>
+      <data name="Value" id="6" type="varDataEncoding" description="Annotation value"/>
+    </group>
+  </message>
+
+  <!--
+    MessageLevelNotes: no groups, just fixed fields + multiple var data
+    at the message level. Simpler than the group cases but still important.
+    Fixed block: int64 + uint32 = 12 bytes
+  -->
+  <message name="MessageLevelNotes" id="5" blockLength="12" description="Message with var data at message level only">
+    <field name="Id"      id="1" type="int64"  description="Record identifier"/>
+    <field name="Version" id="2" type="uint32" description="Record version"/>
+    <data  name="Name"    id="10" type="varDataEncoding" description="Record name"/>
+    <data  name="Value"   id="11" type="varDataEncoding" description="Record value"/>
+  </message>
+
+</messageSchema>

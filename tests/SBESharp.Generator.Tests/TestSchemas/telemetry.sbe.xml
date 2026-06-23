@@ -1,0 +1,275 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Device-telemetry schema exercising unusual SBE feature combinations:
+  - Minimal single-byte fixed block (PingMessage)
+  - Every primitive type in one message (SensorReadingsMessage)
+  - Multiple groups with different entry sizes (DiagnosticsMessage)
+  - uint16-based enum and set types (StatusMessage)
+  - Fields → group → message-level varData ordering (EventLogMessage)
+  - Multiple varData fields with no groups (ManifestMessage)
+  - Enum and set fields inside group entries (SubscriptionsMessage)
+  - uint32 numInGroup encoding (BatchMessage)
+  - Optional fields with null sentinels (OptionalReadingsMessage)
+  - Constant enum field inside a group entry (CalibrationMessage)
+  - Two groups followed by message-level varData (SnapshotMessage)
+  - Foreign-namespace annotation attributes that parsers must ignore (ext:units)
+-->
+<messageSchema
+  xmlns="http://fixprotocol.io/2016/sbe"
+  xmlns:ext="urn:sbesharp:test:extensions"
+  package="SBESharp.TestSchemas.Telemetry"
+  id="103"
+  version="0"
+  description="Device telemetry schema exercising edge-case SBE feature combinations"
+  byteOrder="littleEndian">
+
+  <types>
+    <type name="uint8"   primitiveType="uint8"/>
+    <type name="uint16"  primitiveType="uint16"/>
+    <type name="uint32"  primitiveType="uint32"/>
+    <type name="uint64"  primitiveType="uint64"/>
+    <type name="int8"    primitiveType="int8"/>
+    <type name="int16"   primitiveType="int16"/>
+    <type name="int32"   primitiveType="int32"/>
+    <type name="int64"   primitiveType="int64"/>
+    <type name="float"   primitiveType="float"/>
+    <type name="double"  primitiveType="double"/>
+
+    <!-- Optional encodings: null sentinels follow the SBE defaults for each primitive -->
+    <type name="optionalInt32"  primitiveType="int32"  presence="optional" nullValue="-2147483648"/>
+    <type name="optionalDouble" primitiveType="double" presence="optional"/>
+    <type name="optionalUint8"  primitiveType="uint8"  presence="optional" nullValue="255"/>
+
+    <composite name="messageHeader">
+      <type name="blockLength" primitiveType="uint16"/>
+      <type name="templateId"  primitiveType="uint16"/>
+      <type name="schemaId"    primitiveType="uint16"/>
+      <type name="version"     primitiveType="uint16"/>
+    </composite>
+
+    <composite name="groupSizeEncoding">
+      <type name="blockLength" primitiveType="uint16"/>
+      <type name="numInGroup"  primitiveType="uint8"/>
+    </composite>
+
+    <!-- Large numInGroup for stress testing -->
+    <composite name="groupSizeEncoding32">
+      <type name="blockLength" primitiveType="uint16"/>
+      <type name="numInGroup"  primitiveType="uint32"/>
+    </composite>
+
+    <composite name="varStringEncoding">
+      <type name="length"  primitiveType="uint16"/>
+      <type name="varData" primitiveType="uint8" length="0" characterEncoding="UTF-8"/>
+    </composite>
+
+    <enum name="Urgency" encodingType="uint8" description="Message urgency level">
+      <validValue name="Low"      description="Low urgency">0</validValue>
+      <validValue name="Normal"   description="Normal urgency">1</validValue>
+      <validValue name="High"     description="High urgency">2</validValue>
+      <validValue name="Critical" description="Critical urgency">3</validValue>
+    </enum>
+
+    <enum name="Unit" encodingType="uint16" description="Measurement unit (uint16 enum)">
+      <validValue name="Celsius"    description="Degrees Celsius">1</validValue>
+      <validValue name="Kelvin"     description="Kelvin">2</validValue>
+      <validValue name="Pascal"     description="Pascal">3</validValue>
+      <validValue name="Volt"       description="Volt">4</validValue>
+      <validValue name="Ampere"     description="Ampere">5</validValue>
+    </enum>
+
+    <enum name="CalibrationMode" encodingType="uint8" description="How a channel was calibrated">
+      <validValue name="Factory" description="Factory calibration">1</validValue>
+      <validValue name="Manual"  description="Manual calibration">2</validValue>
+    </enum>
+
+    <set name="Capabilities" encodingType="uint16" description="Feature capabilities (uint16 set)">
+      <choice name="Streaming"    description="Supports streaming">0</choice>
+      <choice name="Snapshots"    description="Supports snapshots">1</choice>
+      <choice name="Incremental"  description="Supports incremental updates">2</choice>
+      <choice name="Recovery"     description="Supports recovery">3</choice>
+      <choice name="Compression"  description="Supports compression">4</choice>
+    </set>
+  </types>
+
+  <!--
+    PingMessage: 1 byte — smallest possible fixed block.
+    Tests that a single-byte message round-trips correctly.
+    blockLength = 1 (just one uint8 field)
+  -->
+  <message name="PingMessage" id="1" blockLength="1" description="Single-byte message for minimal size edge case">
+    <field name="Tag" id="1" type="uint8" description="A single tag byte"/>
+  </message>
+
+  <!--
+    SensorReadingsMessage: exercises every primitive type in one message.
+    1+2+4+8+1+2+4+8+4+8 = 42 bytes
+  -->
+  <message name="SensorReadingsMessage" id="2" blockLength="42" description="Message with every primitive type">
+    <field name="FieldU8"     id="1"  type="uint8"  description="Unsigned 8-bit"/>
+    <field name="FieldU16"    id="2"  type="uint16" description="Unsigned 16-bit"/>
+    <field name="FieldU32"    id="3"  type="uint32" description="Unsigned 32-bit"/>
+    <field name="FieldU64"    id="4"  type="uint64" description="Unsigned 64-bit"/>
+    <field name="FieldI8"     id="5"  type="int8"   description="Signed 8-bit"/>
+    <field name="FieldI16"    id="6"  type="int16"  description="Signed 16-bit"/>
+    <field name="FieldI32"    id="7"  type="int32"  description="Signed 32-bit"/>
+    <field name="FieldI64"    id="8"  type="int64"  description="Signed 64-bit"/>
+    <field name="FieldFloat"  id="9"  type="float"  description="32-bit float"/>
+    <field name="FieldDouble" id="10" type="double" description="64-bit double"/>
+  </message>
+
+  <!--
+    DiagnosticsMessage: multiple groups with different entry sizes.
+    Verifies sequential group offset tracking is correct when groups
+    have different field layouts.
+    Fixed block: int64 + uint32 + uint8 (enum) = 8 + 4 + 1 = 13 bytes
+  -->
+  <message name="DiagnosticsMessage" id="3" blockLength="13" description="Message with three groups of different sizes">
+    <field name="SequenceNumber" id="1" type="int64"   description="Sequence number"/>
+    <field name="Count"          id="2" type="uint32"  description="Total count"/>
+    <field name="Urgency"        id="3" type="Urgency" description="Urgency level"/>
+    <!-- Group 1: single int32 field = 4 bytes per entry -->
+    <group name="Ids" id="10" dimensionType="groupSizeEncoding" description="List of identifiers">
+      <field name="Id" id="11" type="int32" description="An identifier"/>
+    </group>
+    <!-- Group 2: two fields = int64 + double = 16 bytes per entry -->
+    <group name="Samples" id="20" dimensionType="groupSizeEncoding" description="Sampled values">
+      <field name="Timestamp" id="21" type="int64"  description="Sample timestamp"/>
+      <field name="Value"     id="22" type="double" description="Sample value"/>
+    </group>
+    <!-- Group 3: three fields = uint32 + uint32 + uint16 = 10 bytes per entry -->
+    <group name="Stats" id="30" dimensionType="groupSizeEncoding" description="Statistics entries">
+      <field name="Metric"   id="31" type="uint32" description="Metric identifier"/>
+      <field name="Reading"  id="32" type="uint32" description="Metric reading"/>
+      <field name="Source"   id="33" type="uint16" description="Data source"/>
+    </group>
+  </message>
+
+  <!--
+    StatusMessage: exercises uint16-based enum and set types,
+    plus mixing enum/set with primitive fields.
+    Fixed block: uint16(enum) + uint16(set) + uint8(enum) + double + int64 = 2+2+1+8+8 = 21 bytes
+  -->
+  <message name="StatusMessage" id="4" blockLength="21" description="Message exercising non-uint8 enum and set types">
+    <field name="Unit"        id="1" type="Unit"         description="Measurement unit"/>
+    <field name="Caps"        id="2" type="Capabilities" description="Active capabilities"/>
+    <field name="Priority"    id="3" type="Urgency"      description="Message priority"/>
+    <field name="Reading"     id="4" type="double"       description="Current reading"/>
+    <field name="CaptureTime" id="5" type="int64"        description="Capture timestamp"/>
+  </message>
+
+  <!--
+    EventLogMessage: fixed fields, then a group, then variable-length
+    data at the message level. Tests the SBE-mandated ordering:
+    fields → groups → varData.
+    Fixed block: int64 + int32 = 12 bytes
+  -->
+  <message name="EventLogMessage" id="5" blockLength="12" description="Group followed by variable-length data">
+    <field name="DeviceId"   id="1" type="int64" description="Device identifier"/>
+    <field name="EventCount" id="2" type="int32" description="Number of recorded events"/>
+    <group name="Samples" id="10" dimensionType="groupSizeEncoding" description="Recorded samples">
+      <field name="Value" id="11" type="double" description="Sample value"/>
+      <field name="Count" id="12" type="int32"  description="Sample count"/>
+    </group>
+    <data name="DeviceName"      id="20" type="varStringEncoding" description="Human-readable device name"/>
+    <data name="FirmwareVersion" id="21" type="varStringEncoding" description="Firmware version string"/>
+  </message>
+
+  <!--
+    ManifestMessage: no groups, just fixed fields followed by
+    multiple varData fields. Tests pure varData message.
+    Fixed block: int64 + uint8 = 9 bytes
+  -->
+  <message name="ManifestMessage" id="6" blockLength="9" description="Message with multiple variable-length data fields and no groups">
+    <field name="RequestId" id="1" type="int64" description="Request identifier"/>
+    <field name="Version"   id="2" type="uint8" description="Protocol version"/>
+    <data name="Payload"  id="10" type="varStringEncoding" description="Primary payload"/>
+    <data name="Metadata" id="11" type="varStringEncoding" description="Associated metadata"/>
+    <data name="TraceId"  id="12" type="varStringEncoding" description="Distributed trace identifier"/>
+  </message>
+
+  <!--
+    SubscriptionsMessage: group entries that contain enum and set fields.
+    Tests that enum/set deserialization works inside group entries.
+    Fixed block: uint64 = 8 bytes
+    Group entry: uint32 + Urgency(uint8) + Unit(uint16) + Capabilities(uint16) = 4+1+2+2 = 9 bytes
+  -->
+  <message name="SubscriptionsMessage" id="7" blockLength="8" description="Group entries containing enum and set fields">
+    <field name="SessionId" id="1" type="uint64" description="Session identifier"/>
+    <group name="Subscriptions" id="10" dimensionType="groupSizeEncoding" description="Active subscriptions">
+      <field name="ChannelId" id="11" type="uint32"       description="Channel identifier"/>
+      <field name="Priority"  id="12" type="Urgency"      description="Subscription priority"/>
+      <field name="Unit"      id="13" type="Unit"         description="Unit filter"/>
+      <field name="Features"  id="14" type="Capabilities" description="Requested features"/>
+    </group>
+  </message>
+
+  <!--
+    BatchMessage: uses uint32 numInGroup encoding.
+    Tests that we handle 32-bit group counts correctly.
+    Fixed block: int64 = 8 bytes
+    Group header: uint16 blockLength + uint32 numInGroup = 6 bytes
+    Group entry: int64 + int32 = 12 bytes
+  -->
+  <message name="BatchMessage" id="8" blockLength="8" description="Message with uint32 numInGroup encoding">
+    <field name="BatchId" id="1" type="int64" description="Batch identifier"/>
+    <group name="Items" id="10" dimensionType="groupSizeEncoding32" description="Batch items with uint32 count">
+      <field name="ItemId"  id="11" type="int64" description="Item identifier"/>
+      <field name="Payload" id="12" type="int32" description="Item payload"/>
+    </group>
+  </message>
+
+  <!--
+    OptionalReadingsMessage: fields with presence="optional" and explicit
+    null sentinels. Optional fields occupy their full wire size and
+    contribute to blockLength; SBESharp passes the sentinel values through
+    and leaves null interpretation to the caller.
+    Fixed block: int64 + int32 + double + uint8 = 8+4+8+1 = 21 bytes
+  -->
+  <message name="OptionalReadingsMessage" id="9" blockLength="21" description="Optional fields with null sentinels">
+    <field name="RecordId"     id="1" type="int64"          description="Record identifier"/>
+    <field name="SampleCount"  id="2" type="optionalInt32"  presence="optional" description="Sample count, INT32 min when null"/>
+    <field name="Temperature"  id="3" type="optionalDouble" presence="optional" description="Temperature reading, NaN when null"/>
+    <field name="RetryCount"   id="4" type="optionalUint8"  presence="optional" description="Retry count, 255 when null"/>
+  </message>
+
+  <!--
+    CalibrationMessage: a constant enum field INSIDE a group entry.
+    Constants occupy zero bytes on the wire and do not contribute to the
+    entry blockLength — the decoder returns the value from the schema.
+    Fixed block: uint64 = 8 bytes
+    Group entry: int32 + double = 12 bytes (Mode is constant: 0 bytes)
+    The ext:units attributes are foreign-namespace annotations the parser must ignore.
+  -->
+  <message name="CalibrationMessage" id="10" blockLength="8" description="Group entries with a constant enum field">
+    <field name="DeviceId" id="1" type="uint64" description="Device identifier"/>
+    <group name="Channels" id="10" dimensionType="groupSizeEncoding" description="Calibrated channels">
+      <field name="ChannelId" id="11" type="int32"  description="Channel identifier"/>
+      <field name="Offset"    id="12" type="double" ext:units="volts" description="Calibration offset"/>
+      <field name="Mode"      id="13" type="CalibrationMode" presence="constant" valueRef="CalibrationMode.Factory" description="Calibration mode (constant)"/>
+    </group>
+  </message>
+
+  <!--
+    SnapshotMessage: TWO sequential groups followed by message-level varData.
+    Tests that the second group is parsed from the correct offset and that
+    varData positioned after both groups decodes correctly.
+    Fixed block: uint64 + uint64 = 16 bytes
+    Sensors entry: int64 + double = 16 bytes
+    Actuators entry: int64 + uint8 = 9 bytes
+  -->
+  <message name="SnapshotMessage" id="11" blockLength="16" description="Two groups followed by variable-length data">
+    <field name="CaptureTime" id="1" type="uint64" description="Capture timestamp"/>
+    <field name="UpdateId"    id="2" type="uint64" description="Update identifier"/>
+    <group name="Sensors" id="10" dimensionType="groupSizeEncoding" description="Sensor readings">
+      <field name="SensorId" id="11" type="int64"  description="Sensor identifier"/>
+      <field name="Value"    id="12" type="double" ext:units="celsius" description="Sensor value"/>
+    </group>
+    <group name="Actuators" id="20" dimensionType="groupSizeEncoding" description="Actuator states">
+      <field name="ActuatorId" id="21" type="int64" description="Actuator identifier"/>
+      <field name="State"      id="22" type="uint8" description="Actuator state"/>
+    </group>
+    <data name="DeviceName" id="30" type="varStringEncoding" description="Human-readable device name"/>
+  </message>
+
+</messageSchema>

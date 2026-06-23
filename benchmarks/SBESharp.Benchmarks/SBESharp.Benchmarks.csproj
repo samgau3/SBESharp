@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Standalone dev tool: never packed, never built by CI, not StyleCop-gated.
+         Vendored competitor stubs and benchmark scaffolding don't need the library's style rigor. -->
+    <IsPackable>false</IsPackable>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Benchmarks are not held to the library's StyleCop rules. -->
+    <PackageReference Update="StyleCop.Analyzers.Unstable" ExcludeAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" />
+    <!-- Real Logic SBE C# runtime (DirectBuffer), referenced by the vendored generated stubs.
+         Only the runtime DLL is used; the package's Java code generator is never invoked. -->
+    <PackageReference Include="sbe-tool" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- SBESharp runtime, plus its source generator wired as an analyzer so the benchmark's
+         schema is code-generated here (the generator is PrivateAssets in SBESharp, so it does
+         not flow transitively and must be referenced explicitly). -->
+    <ProjectReference Include="..\..\src\SBESharp\SBESharp.csproj" />
+    <ProjectReference Include="..\..\src\SBESharp.Generator\SBESharp.Generator.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AdditionalFiles Include="Schemas\car.sbe.xml" />
+  </ItemGroup>
+
+</Project>
