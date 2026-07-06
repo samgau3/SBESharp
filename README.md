@@ -81,7 +81,7 @@ That's it — build the project and the generated types appear in the namespace 
 
 ### 3. Encode a message
 
-Encoding is explicit and allocation-free: you supply the buffer, the fluent encoders write into it.
+Encoding is allocation-free and driven by an `SbeMessageWriter`, which owns the write cursor. You never compute a byte offset or pre-size a buffer by hand — `Encode` writes the framing header, groups write their own dimension headers, and each write advances the cursor:
 
 ```csharp
 using System.Text;
@@ -90,39 +90,34 @@ using Acme.Telemetry;
 
 byte[] deviceName = Encoding.UTF8.GetBytes("thermo-01");
 
-// header(8) + fixed block(12) + group header(3) + 2 entries(2 × 12) + varData(2 + name)
-int totalSize = SbeMessageHeader.EncodedLength
-    + SensorUpdate.SbeBlockLength
-    + 3 + (2 * 12)
-    + 2 + deviceName.Length;
+// Encode into a fixed buffer (zero allocation)...
+byte[] buffer = new byte[64];
+var writer = new SbeMessageWriter(buffer);
 
-byte[] buffer = new byte[totalSize];
+// ...or into a growable IBufferWriter<byte> — no sizing required:
+// var output = new ArrayBufferWriter<byte>();
+// var writer = new SbeMessageWriter(output);
 
-// 1. Framing header
-new SbeMessageHeader
-{
-    BlockLength = SensorUpdate.SbeBlockLength,
-    TemplateId = SensorUpdate.TemplateId,
-    SchemaId = SensorUpdate.SchemaId,
-    Version = 0,
-}.Write(buffer);
-
-// 2. Fixed fields
-int bodyOffset = SbeMessageHeader.EncodedLength;
-SensorUpdateEncoder.Encode(buffer, offset: bodyOffset)
+// 1. Framing header + fixed fields
+SensorUpdateEncoder.Encode(ref writer)
     .SetDeviceId(42L)
     .SetEventCount(2);
 
-// 3. Repeating group — Open writes the dimension header, NextEntry advances
-int groupOffset = bodyOffset + SensorUpdate.SbeBlockLength;
-var samples = SensorUpdateSamplesGroupEncoder.Open(buffer, groupOffset, count: 2);
+// 2. Repeating group — Open writes the dimension header, NextEntry advances
+var samples = SensorUpdateSamplesGroupEncoder.Open(ref writer, count: 2);
 samples.SetValue(21.5).SetCount(100);
 samples.NextEntry().SetValue(22.0).SetCount(200);
 
-// 4. Variable-length data — returns the number of bytes written
-int varOffset = groupOffset + 3 + (2 * 12);
-SensorUpdateEncoder.WriteDeviceName(buffer, varOffset, deviceName);
+// 3. Variable-length data
+SensorUpdateEncoder.WriteDeviceName(ref writer, deviceName);
+
+// writer.BytesWritten is the exact encoded length, ready to frame or send.
+int length = writer.BytesWritten;
 ```
+
+`SbeSerializer.Encode<SensorUpdateEncoder>(ref writer)` is the generic counterpart to `Deserialize<T>` if you prefer to dispatch on the encoder type.
+
+Every encoder also keeps an offset-based overload (`Encode(Span<byte>, int offset)`, `Open(Span<byte>, int offset, count)`, `Write…(Span<byte>, int offset, value)`) for callers that manage their own buffer layout — for example, encoding into `stackalloc` memory.
 
 ### 4. Decode a message
 
@@ -165,7 +160,7 @@ For each `<message>` in the schema, the generator emits:
 | Type | Purpose |
 |------|---------|
 | `{Name}` | The decoder: a `public ref struct` (or plain `struct` for messages without buffer-backed fields) implementing `ISbeDeserializable<{Name}>`, with `TemplateId`, `SchemaId`, and `SbeBlockLength` constants |
-| `{Name}Encoder` | Fluent, zero-allocation field setters plus static `Write{Data}` helpers for varData |
+| `{Name}Encoder` | Fluent, zero-allocation field setters implementing `ISbeMessageEncoder<{Name}Encoder>`; `Encode(ref SbeMessageWriter)` writes the framing header, plus `Write{Data}` helpers for varData. An offset-based `Encode(Span<byte>, int)` overload remains for manual buffer layout |
 | `{Message}{Group}Entry` | Blittable entry struct for each repeating group |
 | `{Message}{Group}GroupEncoder` | Writes the group dimension header and entries |
 | `{Message}{Group}Decoder` | Flyweight decoder for groups that contain nested groups or varData (`MoveNext()` / accessors) |
@@ -187,6 +182,8 @@ To inspect the generated code, add this to your `.csproj` and look under `obj/{C
 Everything lives in the `SBESharp` namespace:
 
 - **`SbeSerializer.Deserialize<T>(ReadOnlySpan<byte>)`** — decodes a generated message type, skipping the 8-byte framing header.
+- **`SbeSerializer.Encode<TEncoder>(ref SbeMessageWriter)`** — begins encoding a message, writing the framing header; the symmetric counterpart to `Deserialize<T>`.
+- **`SbeMessageWriter`** — a forward-only encode cursor over a fixed `Memory<byte>` (zero allocation) or a growable `IBufferWriter<byte>`; owns the write position so encoders never expose byte offsets. `BytesWritten` reports the encoded length.
 - **`SbeSerializer.Read<T>` / `Serialize<T>`** — raw blittable struct read/write with bounds checks, for headerless payloads.
 - **`SbeMessageHeader`** — the standard 8-byte SBE framing header (`BlockLength`, `TemplateId`, `SchemaId`, `Version`) with `Read`/`Write`.
 - **`SbeGroupView<T>`** — zero-allocation view over a repeating group; indexer and `foreach` decode entries on demand.
@@ -225,7 +222,7 @@ The hot path — generated `Deserialize`, fluent encoders, `SbeGroupView<T>` —
 
 - Little-endian decode is a single `MemoryMarshal.Read` of the fixed block plus offset arithmetic; groups and varData are views into the original buffer.
 - No virtual dispatch, no boxing, no closures; `ref struct` types keep everything on the stack.
-- Encoding writes directly into a caller-supplied buffer; the only allocating API is the convenience `SbeSerializer.Serialize<T>(in T)` overload, which is documented as such.
+- Encoding writes directly through an `SbeMessageWriter` into a caller-supplied `Memory<byte>` (zero allocation) or a caller-owned `IBufferWriter<byte>`; the only allocating API is the convenience `SbeSerializer.Serialize<T>(in T)` overload, which is documented as such.
 
 ### Benchmarks
 

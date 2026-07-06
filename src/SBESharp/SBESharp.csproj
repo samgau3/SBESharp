@@ -8,7 +8,7 @@
   <PropertyGroup>
     <IsPackable>true</IsPackable>
     <PackageId>SBESharp</PackageId>
-    <Version>0.1.0-preview.1</Version>
+    <Version>0.2.0-preview.1</Version>
     <Authors>Samuel Gaudreau</Authors>
     <Company>Samuel Gaudreau</Company>
     <Product>SBESharp</Product>

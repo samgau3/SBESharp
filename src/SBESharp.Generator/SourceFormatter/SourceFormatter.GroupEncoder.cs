@@ -13,6 +13,8 @@ public sealed partial class SourceFormatter
 		var dim = this.ResolveGroupDimension(group);
 		var writeBlockLength = EmitHelpers.BuildWriteExpression(dim.BlockLengthCsType, this._schema.ByteOrder, "buffer.Slice(offset)", $"({dim.BlockLengthCsType}){blockLength}");
 		var writeNumInGroup = EmitHelpers.BuildWriteExpression(dim.NumInGroupCsType, this._schema.ByteOrder, $"buffer.Slice(offset + {dim.BlockLengthSize})", $"({dim.NumInGroupCsType})count");
+		var writeBlockLengthRegion = EmitHelpers.BuildWriteExpression(dim.BlockLengthCsType, this._schema.ByteOrder, "region.Slice(0)", $"({dim.BlockLengthCsType}){blockLength}");
+		var writeNumInGroupRegion = EmitHelpers.BuildWriteExpression(dim.NumInGroupCsType, this._schema.ByteOrder, $"region.Slice({dim.BlockLengthSize})", $"({dim.NumInGroupCsType})count");
 
 		this._writer.WriteLine($$"""
 			/// <summary>Zero-allocation encoder for the {{group.Name}} repeating group.</summary>
@@ -29,6 +31,17 @@ public sealed partial class SourceFormatter
 					{{writeBlockLength}};
 					{{writeNumInGroup}};
 					return new {{encoderName}}(buffer, offset, count);
+				}
+
+				/// <summary>Reserves the group region on <paramref name="writer"/>, writes the header, and returns an encoder for the entries.</summary>
+				public static {{encoderName}} Open(ref SbeMessageWriter writer, int count)
+				{
+					int size = {{dim.HeaderSize}} + (count * {{blockLength}});
+					var region = writer.GetSpan(size);
+					{{writeBlockLengthRegion}};
+					{{writeNumInGroupRegion}};
+					writer.Advance(size);
+					return new {{encoderName}}(region, 0, count);
 				}
 
 				private {{encoderName}}(Span<byte> buffer, int headerOffset, int count)
