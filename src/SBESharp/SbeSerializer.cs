@@ -27,6 +27,18 @@ public static class SbeSerializer
 		=> T.Deserialize(buffer);
 
 	/// <summary>
+	/// Begins encoding a message into <paramref name="writer"/>, writing the leading 8-byte
+	/// framing header and returning a fluent encoder positioned at the fixed block. This is the
+	/// encode-side counterpart to <see cref="Deserialize{T}(ReadOnlySpan{byte})"/>.
+	/// </summary>
+	/// <typeparam name="TEncoder">A generated encoder implementing <see cref="ISbeMessageEncoder{TSelf}"/>.</typeparam>
+	/// <param name="writer">The message writer to encode into. Its cursor is advanced past the header.</param>
+	/// <returns>A fluent encoder for the message body.</returns>
+	public static TEncoder Encode<TEncoder>(ref SbeMessageWriter writer)
+		where TEncoder : ISbeMessageEncoder<TEncoder>, allows ref struct
+		=> TEncoder.Encode(ref writer);
+
+	/// <summary>
 	/// Reads a value of type <typeparamref name="T"/> from the beginning of <paramref name="buffer"/>.
 	/// </summary>
 	/// <typeparam name="T">An unmanaged struct with a blittable binary layout.</typeparam>

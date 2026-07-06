@@ -12,7 +12,7 @@ public sealed partial class SourceFormatter
 
 		this._writer.WriteLine($$"""
 			/// <summary>Zero-allocation encoder for the {{message.Name}} message.</summary>
-			public ref struct {{encoderName}}
+			public ref struct {{encoderName}} : ISbeMessageEncoder<{{encoderName}}>
 			{
 				private readonly Span<byte> _buffer;
 				private readonly int _offset;
@@ -21,6 +21,15 @@ public sealed partial class SourceFormatter
 				public static {{encoderName}} Encode(Span<byte> buffer, int offset = 0)
 				{
 					return new {{encoderName}}(buffer, offset);
+				}
+
+				/// <summary>Writes the framing header into <paramref name="writer"/> and returns an encoder positioned at the fixed block.</summary>
+				public static {{encoderName}} Encode(ref SbeMessageWriter writer)
+				{
+					writer.WriteHeader({{message.Name}}.SbeBlockLength, {{message.Name}}.TemplateId, {{message.Name}}.SchemaId);
+					var block = writer.GetSpan({{message.Name}}.SbeBlockLength);
+					writer.Advance({{message.Name}}.SbeBlockLength);
+					return new {{encoderName}}(block, 0);
 				}
 
 				private {{encoderName}}(Span<byte> buffer, int offset)
@@ -146,6 +155,7 @@ public sealed partial class SourceFormatter
 				var enc = this.ResolveVarDataEncoding(data);
 				var capName = EmitHelpers.CapitalizeFirstChar(data.Name);
 				var writeLenExpr = EmitHelpers.BuildWriteExpression(enc.LengthCsType, this._schema.ByteOrder, "buffer.Slice(offset)", $"({enc.LengthCsType})value.Length");
+				var writeLenExprRegion = EmitHelpers.BuildWriteExpression(enc.LengthCsType, this._schema.ByteOrder, "region.Slice(0)", $"({enc.LengthCsType})value.Length");
 
 				this._writer.WriteLine($$"""
 
@@ -155,6 +165,17 @@ public sealed partial class SourceFormatter
 						{{writeLenExpr}};
 						value.CopyTo(buffer.Slice(offset + {{enc.LengthSize}}));
 						return {{enc.LengthSize}} + value.Length;
+					}
+
+					/// <summary>Writes the <c>{{data.Name}}</c> variable-length data field to <paramref name="writer"/> and returns the number of bytes written.</summary>
+					public static int Write{{capName}}(ref SbeMessageWriter writer, ReadOnlySpan<byte> value)
+					{
+						int size = {{enc.LengthSize}} + value.Length;
+						var region = writer.GetSpan(size);
+						{{writeLenExprRegion}};
+						value.CopyTo(region.Slice({{enc.LengthSize}}));
+						writer.Advance(size);
+						return size;
 					}
 					""");
 			}

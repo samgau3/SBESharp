@@ -381,4 +381,98 @@ public sealed class LogStreamTests
 		// Assert — outer varData
 		Assert.Equal("outer", Encoding.UTF8.GetString(outerDec.GetNote()));
 	}
+
+	[Fact]
+	public void RecordWithNote_WriterPath_VarDataPerEntry_RoundTrips()
+	{
+		// Arrange — a complex group: each entry has fixed fields followed by varData
+		var note1 = Encoding.UTF8.GetBytes("X");
+		var note2 = Encoding.UTF8.GetBytes("YZ");
+		var output = new System.Buffers.ArrayBufferWriter<byte>();
+		var writer = new SbeMessageWriter(output);
+
+		// Act — encode; the writer owns the cursor, no offset math
+		RecordWithNoteEncoder.Encode(ref writer).SetStreamId(1U);
+
+		var enc = RecordWithNoteRecordsGroupEncoder.Open(ref writer, count: 2);
+		enc.SetTimestamp(10L).SetThreadId(20L);
+		RecordWithNoteRecordsGroupEncoder.WriteNote(ref writer, note1);
+		enc.NextEntry(ref writer);
+		enc.SetTimestamp(30L).SetThreadId(40L);
+		RecordWithNoteRecordsGroupEncoder.WriteNote(ref writer, note2);
+
+		var msg = SbeSerializer.Deserialize<RecordWithNote>(output.WrittenSpan);
+
+		// Assert
+		Assert.Equal(1U, msg.StreamId);
+
+		var decoder = new RecordWithNote.RecordWithNoteRecordsDecoder(
+			output.WrittenSpan.Slice(SbeMessageHeader.EncodedLength + RecordWithNote.SbeBlockLength));
+		Assert.Equal(2, decoder.Count);
+
+		Assert.True(decoder.MoveNext());
+		Assert.Equal(10L, decoder.Timestamp);
+		Assert.Equal(20L, decoder.ThreadId);
+		Assert.Equal("X", Encoding.UTF8.GetString(decoder.GetNote()));
+
+		Assert.True(decoder.MoveNext());
+		Assert.Equal(30L, decoder.Timestamp);
+		Assert.Equal(40L, decoder.ThreadId);
+		Assert.Equal("YZ", Encoding.UTF8.GetString(decoder.GetNote()));
+
+		Assert.False(decoder.MoveNext());
+	}
+
+	[Fact]
+	public void NestedRecords_WriterPath_NestedGroupAndVarData_RoundTrips()
+	{
+		// Arrange — outer entry: fixed field, a nested group (fixed + varData each), then outer varData
+		var spanNote0 = Encoding.UTF8.GetBytes("N0");
+		var spanNote1 = Encoding.UTF8.GetBytes("N1!");
+		var outerNote = Encoding.UTF8.GetBytes("outer");
+		var output = new System.Buffers.ArrayBufferWriter<byte>();
+		var writer = new SbeMessageWriter(output);
+
+		// Act — the entire nested layout with no offset threading
+		NestedRecordsEncoder.Encode(ref writer).SetStreamId(42U);
+
+		var outer = NestedRecordsRecordsGroupEncoder.Open(ref writer, count: 1);
+		outer.SetTimestamp(999L);
+
+		var nested = outer.OpenSpans(ref writer, count: 2);
+		nested.SetDuration(100L);
+		NestedRecordsSpansGroupEncoder.WriteSpanNote(ref writer, spanNote0);
+		nested.NextEntry(ref writer);
+		nested.SetDuration(200L);
+		NestedRecordsSpansGroupEncoder.WriteSpanNote(ref writer, spanNote1);
+
+		NestedRecordsRecordsGroupEncoder.WriteNote(ref writer, outerNote);
+
+		var msg = SbeSerializer.Deserialize<NestedRecords>(output.WrittenSpan);
+
+		// Assert — fixed field
+		Assert.Equal(42U, msg.StreamId);
+
+		// Assert — outer group
+		ReadOnlySpan<byte> body = output.WrittenSpan.Slice(SbeMessageHeader.EncodedLength);
+		var outerDec = new NestedRecords.NestedRecordsRecordsDecoder(
+			body.Slice(NestedRecords.SbeBlockLength));
+		Assert.Equal(1, outerDec.Count);
+		Assert.True(outerDec.MoveNext());
+		Assert.Equal(999L, outerDec.Timestamp);
+
+		// Assert — nested group decoded from correct positions
+		var nestedDec = outerDec.GetSpans();
+		Assert.Equal(2, nestedDec.Count);
+		Assert.True(nestedDec.MoveNext());
+		Assert.Equal(100L, nestedDec.Duration);
+		Assert.Equal("N0", Encoding.UTF8.GetString(nestedDec.GetSpanNote()));
+		Assert.True(nestedDec.MoveNext());
+		Assert.Equal(200L, nestedDec.Duration);
+		Assert.Equal("N1!", Encoding.UTF8.GetString(nestedDec.GetSpanNote()));
+		Assert.False(nestedDec.MoveNext());
+
+		// Assert — outer varData positioned after the nested group
+		Assert.Equal("outer", Encoding.UTF8.GetString(outerDec.GetNote()));
+	}
 }

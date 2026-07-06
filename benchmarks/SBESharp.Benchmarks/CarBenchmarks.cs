@@ -64,6 +64,22 @@ public class CarBenchmarks
 				throw new InvalidOperationException($"Wire bytes differ at offset {i}: the comparison is not apples-to-apples.");
 			}
 		}
+
+		// The writer-based encode path must produce the identical full-message length and body bytes.
+		byte[] writerBuf = new byte[256];
+		int writerLen = EncodeSbeWriter(writerBuf);
+		if (writerLen != refLen)
+		{
+			throw new InvalidOperationException($"Writer-path encoded length differs: writer={writerLen}, RealLogic={refLen}.");
+		}
+
+		for (int i = HeaderSize; i < writerLen; i++)
+		{
+			if (writerBuf[i] != _decodeBuffer[i])
+			{
+				throw new InvalidOperationException($"Writer-path wire bytes differ at offset {i}.");
+			}
+		}
 	}
 
 	[GlobalCleanup]
@@ -73,8 +89,11 @@ public class CarBenchmarks
 		_refDecodeDb.Dispose();
 	}
 
-	[Benchmark(Description = "SBESharp encode")]
+	[Benchmark(Description = "SBESharp encode (offset)")]
 	public int SbeSharpEncode() => EncodeSbe(_encodeBuffer);
+
+	[Benchmark(Description = "SBESharp encode (writer)")]
+	public int SbeSharpEncodeWriter() => EncodeSbeWriter(_encodeBuffer);
 
 	[Benchmark(Description = "Real Logic encode")]
 	public int RealLogicEncode() => EncodeRefInto(_refEncodeDb);
@@ -154,6 +173,27 @@ public class CarBenchmarks
 		varOffset += Sbe.CarEncoder.WriteModel(buffer, varOffset, _model);
 		varOffset += Sbe.CarEncoder.WriteActivationCode(buffer, varOffset, _activationCode);
 		return varOffset;
+	}
+
+	private int EncodeSbeWriter(byte[] buffer)
+	{
+		var writer = new SbeMessageWriter(buffer);
+		Sbe.CarEncoder.Encode(ref writer)
+			.SetSerialNumber(SerialNumber)
+			.SetModelYear(ModelYear)
+			.SetAvailable(Sbe.BooleanType.T)
+			.SetCode(Sbe.Model.A)
+			.SetSomeNumbers(_someNumbers)
+			.SetVehicleCode(_vehicleCode)
+			.SetExtras(Sbe.OptionalExtras.sunRoof | Sbe.OptionalExtras.cruiseControl);
+
+		Sbe.CarFuelFiguresGroupEncoder.Open(ref writer, count: 0);
+		Sbe.CarPerformanceFiguresGroupEncoder.Open(ref writer, count: 0);
+
+		Sbe.CarEncoder.WriteManufacturer(ref writer, _manufacturer);
+		Sbe.CarEncoder.WriteModel(ref writer, _model);
+		Sbe.CarEncoder.WriteActivationCode(ref writer, _activationCode);
+		return writer.BytesWritten;
 	}
 
 	private int EncodeRef() => EncodeRefInto(_refDecodeDb);

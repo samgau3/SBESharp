@@ -38,6 +38,38 @@ public sealed class TelemetryTests
 	}
 
 	[Fact]
+	public void PingMessage_WriterRoundTrip_FixedBuffer()
+	{
+		// Arrange
+		byte[] buffer = new byte[SbeMessageHeader.EncodedLength + PingMessage.SbeBlockLength];
+		var writer = new SbeMessageWriter(buffer);
+
+		// Act
+		PingMessageEncoder.Encode(ref writer).SetTag(42);
+		var msg = SbeSerializer.Deserialize<PingMessage>(buffer);
+
+		// Assert
+		Assert.Equal(42, msg.Tag);
+		Assert.Equal(SbeMessageHeader.EncodedLength + PingMessage.SbeBlockLength, writer.BytesWritten);
+	}
+
+	[Fact]
+	public void PingMessage_WriterRoundTrip_GrowableBuffer()
+	{
+		// Arrange
+		var output = new System.Buffers.ArrayBufferWriter<byte>();
+		var writer = new SbeMessageWriter(output);
+
+		// Act
+		SbeSerializer.Encode<PingMessageEncoder>(ref writer).SetTag(42);
+		var msg = SbeSerializer.Deserialize<PingMessage>(output.WrittenSpan);
+
+		// Assert
+		Assert.Equal(42, msg.Tag);
+		Assert.Equal(SbeMessageHeader.EncodedLength + PingMessage.SbeBlockLength, output.WrittenCount);
+	}
+
+	[Fact]
 	public void PingMessage_Constants_MatchSchema()
 	{
 		// Arrange / Act / Assert
@@ -160,6 +192,95 @@ public sealed class TelemetryTests
 		Assert.Equal(3U, msg.Stats[2].Metric);
 		Assert.Equal(3000U, msg.Stats[2].Reading);
 		Assert.Equal(30, msg.Stats[2].Source);
+	}
+
+	[Fact]
+	public void DiagnosticsMessage_WriterPath_ThreeGroups_AllFieldsCorrect()
+	{
+		// Arrange — no manual offset math; the writer owns the cursor
+		var expectedSize = SbeMessageHeader.EncodedLength
+			+ DiagnosticsMessage.SbeBlockLength
+			+ GroupHeaderSize + (2 * 4)
+			+ GroupHeaderSize + (1 * 16)
+			+ GroupHeaderSize + (3 * 10);
+		byte[] buffer = new byte[expectedSize];
+		var writer = new SbeMessageWriter(buffer);
+
+		// Act — encode
+		DiagnosticsMessageEncoder.Encode(ref writer)
+			.SetSequenceNumber(999L).SetCount(6).SetUrgency(Urgency.High);
+
+		var ids = DiagnosticsMessageIdsGroupEncoder.Open(ref writer, count: 2);
+		ids.SetId(100);
+		ids.NextEntry().SetId(200);
+
+		DiagnosticsMessageSamplesGroupEncoder.Open(ref writer, count: 1)
+			.SetTimestamp(1700000000000000L).SetValue(99.99);
+
+		var stats = DiagnosticsMessageStatsGroupEncoder.Open(ref writer, count: 3);
+		stats.SetMetric(1).SetReading(1000).SetSource(10);
+		stats.NextEntry().SetMetric(2).SetReading(2000).SetSource(20);
+		stats.NextEntry().SetMetric(3).SetReading(3000).SetSource(30);
+
+		var msg = SbeSerializer.Deserialize<DiagnosticsMessage>(buffer);
+
+		// Assert — the cursor consumed exactly the wire layout
+		Assert.Equal(expectedSize, writer.BytesWritten);
+
+		// Assert — fixed fields
+		Assert.Equal(999L, msg.SequenceNumber);
+		Assert.Equal(6U, msg.Count);
+		Assert.Equal(Urgency.High, msg.Urgency);
+
+		// Assert — Ids group
+		Assert.Equal(2, msg.Ids.Length);
+		Assert.Equal(100, msg.Ids[0].Id);
+		Assert.Equal(200, msg.Ids[1].Id);
+
+		// Assert — Samples group
+		Assert.Equal(1, msg.Samples.Length);
+		Assert.Equal(1700000000000000L, msg.Samples[0].Timestamp);
+		Assert.Equal(99.99, msg.Samples[0].Value);
+
+		// Assert — Stats group
+		Assert.Equal(3, msg.Stats.Length);
+		Assert.Equal(1U, msg.Stats[0].Metric);
+		Assert.Equal(1000U, msg.Stats[0].Reading);
+		Assert.Equal(10, msg.Stats[0].Source);
+		Assert.Equal(3U, msg.Stats[2].Metric);
+		Assert.Equal(3000U, msg.Stats[2].Reading);
+		Assert.Equal(30, msg.Stats[2].Source);
+	}
+
+	[Fact]
+	public void DiagnosticsMessage_WriterPath_GrowableBuffer_ResizeSafeAcrossGroups()
+	{
+		// Arrange — a growable writer that starts empty; group Opens may trigger internal resizes
+		var output = new System.Buffers.ArrayBufferWriter<byte>();
+		var writer = new SbeMessageWriter(output);
+
+		// Act — encode all three groups
+		DiagnosticsMessageEncoder.Encode(ref writer)
+			.SetSequenceNumber(999L).SetCount(6).SetUrgency(Urgency.High);
+		DiagnosticsMessageIdsGroupEncoder.Open(ref writer, count: 2)
+			.SetId(100).NextEntry().SetId(200);
+		DiagnosticsMessageSamplesGroupEncoder.Open(ref writer, count: 1)
+			.SetTimestamp(1700000000000000L).SetValue(99.99);
+		DiagnosticsMessageStatsGroupEncoder.Open(ref writer, count: 1)
+			.SetMetric(7).SetReading(7000).SetSource(70);
+
+		var msg = SbeSerializer.Deserialize<DiagnosticsMessage>(output.WrittenSpan);
+
+		// Assert — fixed fields survived any resize
+		Assert.Equal(999L, msg.SequenceNumber);
+		Assert.Equal(Urgency.High, msg.Urgency);
+
+		// Assert — every group decoded from the correct position
+		Assert.Equal(100, msg.Ids[0].Id);
+		Assert.Equal(200, msg.Ids[1].Id);
+		Assert.Equal(99.99, msg.Samples[0].Value);
+		Assert.Equal(7U, msg.Stats[0].Metric);
+		Assert.Equal(70, msg.Stats[0].Source);
 	}
 
 	[Fact]
@@ -482,6 +603,48 @@ public sealed class TelemetryTests
 		Assert.Equal(21L, msg.Actuators[0].ActuatorId);
 		Assert.Equal(1, msg.Actuators[0].State);
 		Assert.Equal(22L, msg.Actuators[1].ActuatorId);
+		Assert.Equal(0, msg.Actuators[1].State);
+
+		// Assert — varData positioned after both groups
+		Assert.Equal("thermostat-01", Encoding.UTF8.GetString(msg.DeviceName));
+	}
+
+	[Fact]
+	public void SnapshotMessage_WriterPath_GroupsThenVarData_RoundTrips()
+	{
+		// Arrange — fixed fields, two groups, then message-level varData, all via the writer
+		var deviceName = Encoding.UTF8.GetBytes("thermostat-01");
+		var output = new System.Buffers.ArrayBufferWriter<byte>();
+		var writer = new SbeMessageWriter(output);
+
+		// Act — encode
+		SnapshotMessageEncoder.Encode(ref writer)
+			.SetCaptureTime(1700000000UL).SetUpdateId(88UL);
+
+		var sensors = SnapshotMessageSensorsGroupEncoder.Open(ref writer, count: 2);
+		sensors.SetSensorId(11L).SetValue(21.5);
+		sensors.NextEntry().SetSensorId(12L).SetValue(-3.75);
+
+		var actuators = SnapshotMessageActuatorsGroupEncoder.Open(ref writer, count: 2);
+		actuators.SetActuatorId(21L).SetState(1);
+		actuators.NextEntry().SetActuatorId(22L).SetState(0);
+
+		int varBytes = SnapshotMessageEncoder.WriteDeviceName(ref writer, deviceName);
+
+		var msg = SbeSerializer.Deserialize<SnapshotMessage>(output.WrittenSpan);
+
+		// Assert — varData reported its own byte count and the cursor consumed everything
+		Assert.Equal(VarDataLengthSize + deviceName.Length, varBytes);
+		Assert.Equal(output.WrittenCount, writer.BytesWritten);
+
+		// Assert — fixed fields
+		Assert.Equal(1700000000UL, msg.CaptureTime);
+		Assert.Equal(88UL, msg.UpdateId);
+
+		// Assert — both groups decoded from the correct positions
+		Assert.Equal(11L, msg.Sensors[0].SensorId);
+		Assert.Equal(-3.75, msg.Sensors[1].Value);
+		Assert.Equal(21L, msg.Actuators[0].ActuatorId);
 		Assert.Equal(0, msg.Actuators[1].State);
 
 		// Assert — varData positioned after both groups
