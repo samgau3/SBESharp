@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>SBESharp.AotSmokeTest</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <PublishAot>true</PublishAot>
+    <InvariantGlobalization>true</InvariantGlobalization>
+
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\SBESharp\SBESharp.csproj" />
+    <ProjectReference Include="..\..\src\SBESharp.Generator\SBESharp.Generator.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AdditionalFiles Include="..\SBESharp.Generator.Tests\TestSchemas\car.sbe.xml" />
+    <AdditionalFiles Include="..\SBESharp.Generator.Tests\TestSchemas\telemetry.sbe.xml" />
+  </ItemGroup>
+
+</Project>

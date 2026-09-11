@@ -6,7 +6,7 @@ SBESharp parses your SBE XML schemas **at compile time** with a Roslyn source ge
 
 - **Source-generator first** — schemas compile into your assembly; errors surface at build time
 - **Zero allocation** — decoding a message with repeating groups allocates nothing; groups are lazily decoded `ref struct` views over the original buffer
-- **NativeAOT and trim safe** — no reflection, fully AOT-compatible
+- **NativeAOT and trim safe** — no reflection, no runtime code generation; CI publishes a NativeAOT binary and round-trips messages through it, so the claim is tested rather than asserted
 - **Spec compliant** — follows the FIX Trading Community SBE specification: fields → groups → varData ordering, dimension headers, constants, null sentinels, composites
 - **Safe by default** — truncated or malformed buffers fail fast with `ArgumentOutOfRangeException`; decoders never read past the end of your buffer
 

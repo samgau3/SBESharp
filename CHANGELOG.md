@@ -20,6 +20,10 @@ All notable changes to SBESharp are documented here. The format is based on
     variable-length repeating groups, with `NextEntry(ref SbeMessageWriter)` on complex groups.
   - `Write{Data}(ref SbeMessageWriter, value)` for message-level and in-group variable-length data.
 
+- **Debugging symbols** — the package now ships a `.snupkg` symbol package, and SourceLink stamps
+  the PDB with the commit it was built from, so consumers can step into SBESharp's own sources.
+  Release builds on CI are deterministic.
+
 All additions are backward compatible: the existing offset-based encoder overloads
 (`Encode(Span<byte>, offset)`, `Open(Span<byte>, offset, count)`, `Write…(Span<byte>, offset, value)`)
 remain for manual buffer layout and `stackalloc` scenarios.
@@ -29,6 +33,14 @@ remain for manual buffer layout and `stackalloc` scenarios.
 - The writer path is zero-allocation on the fixed-buffer backing (verified by unit test and by the
   `[MemoryDiagnoser]` Car benchmark) and encodes the canonical Car message faster than the Real Logic
   reference codec. The offset-based encoders remain the lowest-latency path.
+
+### Verified
+
+- **NativeAOT** — the AOT and trim analyzers now run against the runtime library, and CI publishes a
+  NativeAOT binary that round-trips messages covering the full feature matrix (composites, fixed-length
+  arrays, enums, sets, constants, nested groups, in-group and message-level variable-length data,
+  `SbeGroupView<T>`, and both writer backings) and fails the build on any ILC warning. The
+  "NativeAOT- and trim-safe" claim is enforced rather than asserted.
 
 ## [0.1.0-preview.1]
 

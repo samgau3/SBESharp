@@ -42,5 +42,32 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: nupkg
-          path: artifacts/*.nupkg
+          path: |
+            artifacts/*.nupkg
+            artifacts/*.snupkg
           if-no-files-found: error
+
+  aot:
+    name: NativeAOT publish smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # ILC shells out to the platform linker to produce the native binary.
+      - name: Install NativeAOT prerequisites
+        run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
+
+      # Publishing is the real check: ILC reports any reflection or runtime-codegen dependency
+      # in the runtime library or the generated codecs, and warnings are errors here. Running the
+      # native binary then proves the codecs still round-trip after ahead-of-time compilation.
+      - name: Publish NativeAOT smoke test
+        run: dotnet publish tests/SBESharp.AotSmokeTest/SBESharp.AotSmokeTest.csproj -c Release -o aot-out
+
+      - name: Run native binary
+        run: ./aot-out/SBESharp.AotSmokeTest
