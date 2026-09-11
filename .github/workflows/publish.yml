@@ -53,7 +53,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: nupkg
-          path: artifacts/*.nupkg
+          path: |
+            artifacts/*.nupkg
+            artifacts/*.snupkg
           if-no-files-found: error
 
       # Request a short-lived API key from nuget.org via OIDC (Trusted Publishing).
